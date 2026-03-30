@@ -658,7 +658,7 @@ bool UnitData::InsertCargo(const Unit &addme)
 		m_cargo_list->Insert(addme);
 
 		g_slicEngine->RunTrigger(TRIGGER_LIST_EMBARKED,
-		                         ST_UNIT, addme,
+		                         ST_UNIT, addme.m_id,
 		                         ST_PLAYER, m_owner,
 		                         ST_END);
 		return true;
@@ -2925,7 +2925,7 @@ void UnitData::Entrench()
 	SetFlag(k_UDF_IS_ENTRENCHING);
 
 	g_slicEngine->RunTrigger(TRIGGER_LIST_FORTIFY,
-							 ST_UNIT, Unit(m_id),
+							 ST_UNIT, m_id,
 							 ST_PLAYER, m_owner,
 							 ST_END);
 }
