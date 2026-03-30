@@ -1,7 +1,9 @@
 *.o
 *.orig
 *.rej
+*~
 Makefile.in
+CLAUDE.md
 *.lo
 *.la
 *.dirstamp
