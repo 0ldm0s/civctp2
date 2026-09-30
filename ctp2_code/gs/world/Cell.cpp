@@ -107,11 +107,12 @@ Cell::Cell()
 #ifdef BATTLE_FLAGS
     m_battleFlags          (0),
 #endif
-    m_continent_number     (0),
+    m_unused               (0),
     m_gf                   (0),
     m_terrain_type         (-1),
     m_city                 (),
     m_cellOwner            (-1),
+    m_continentIDs         (),
     m_unit_army            (NULL),
     m_objects              (NULL),
     m_jabba                (NULL),
@@ -389,7 +390,7 @@ sint32 Cell::GetFoodProduced() const
 				g_theTerrainImprovementDB->Get(m_objects->Access(i).m_id & k_ID_KEY_MASK);
 			const TerrainImprovementRecord::Effect *effect;
 			effect = terrainutil_GetTerrainEffect(impRec, m_terrain_type);
-			sint32 bonus;
+			sint32 bonus = 0;
 			if(effect && effect->GetBonusFood(bonus)) {
 				food += bonus;
 			}
@@ -1040,7 +1041,7 @@ sint32 Cell::GetBaseMoveCosts()
 	bool gotMovement = rec->GetEnvBase()->GetMovement(base);
 	Assert(gotMovement);
 
-	sint32 m;
+	sint32 m = 0;
 	if(HasCity() && rec->HasEnvCity() && rec->GetEnvCityPtr()->GetMovement(m)) {
 		base = std::min(base, m);
 	}

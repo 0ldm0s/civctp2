@@ -24,7 +24,7 @@
 //
 // Modifications from the original Activision code:
 //
-// - Modified EntryCost by Martin Gühmann to allow:
+// - Modified EntryCost by Martin Gï¿½hmann to allow:
 //   - Bypassing of tiles without road improvement, e.g. polluted tiles
 //   - Bypassing of unowend tiles and foreign tiles
 //   - Bypassing of unexplored tiles
@@ -32,14 +32,14 @@
 //   - Building of undersea tunnels
 // - Added owner argument to to FindRoadPath function so that m_owner
 //   can be set in that function. The result is that the path finding
-//   routine takes unexplored tiles into consideration, by Martin Gühmann.
+//   routine takes unexplored tiles into consideration, by Martin Gï¿½hmann.
 // - Road path generation is no more dependent on tile move costs for units,
 //   but on pw costs per tile.
 // - Road path may go through foreign territory but is even more expensive
-//   in comparision to unexplored territory. - Oct. 6th 2004 Martin Gühmann
+//   in comparision to unexplored territory. - Oct. 6th 2004 Martin Gï¿½hmann
 // - Road costs are now based on all the tile improvements a tile has,
-//   including those that are under construction. (17-Jan-2008 Martin Gühmann)
-// - A strategy option can also use to the base move costs of a tile. (17-Jan-2008 Martin Gühmann)
+//   including those that are under construction. (17-Jan-2008 Martin Gï¿½hmann)
+// - A strategy option can also use to the base move costs of a tile. (17-Jan-2008 Martin Gï¿½hmann)
 //
 //----------------------------------------------------------------------------
 
@@ -55,11 +55,6 @@
 #include "World.h"              // g_theWorld
 
 CityAstar g_city_astar;
-
-namespace
-{
-	sint32 const    NODE_VISIT_COUNT_LIMIT  = 2000000000;
-}
 
 bool CityAstar::EntryCost
 (
@@ -197,6 +192,11 @@ sint32 CityAstar::GetMaxDir(MapPoint &pos) const
 	return SOUTH;
 }
 
+sint32 CityAstar::GetArmyId() const
+{
+	return g_theWorld->GetCity(m_start).m_id;
+}
+
 bool CityAstar::IsConnected
 (
     PLAYER_INDEX        owner,
@@ -221,7 +221,7 @@ bool CityAstar::IsConnected
 	Path    tmp_path;
 	sint32  nodes_opened    = 0;
 
-	bool r = FindPath(start, dest, tmp_path, cost, false, NODE_VISIT_COUNT_LIMIT, nodes_opened);
+	bool r = FindPath(start, dest, tmp_path, cost, false, Astar_MaxSearchNodes(), nodes_opened);
 	distance = tmp_path.Num();
 	return r;
 }
@@ -248,7 +248,7 @@ void CityAstar::FindCityDist
 	Path    tmp_path;
 	sint32  nodes_opened    = 0;
 
-	if (!FindPath(start, dest, tmp_path, cost, false, NODE_VISIT_COUNT_LIMIT, nodes_opened))
+	if (!FindPath(start, dest, tmp_path, cost, false, Astar_MaxSearchNodes(), nodes_opened))
 	{
 		cost     = static_cast<float>(g_player[m_owner]->GetMaxEmpireDistance());
 		distance = 0x7fffffff;
@@ -282,7 +282,7 @@ void CityAstar::FindCantEnterPenaltyDistance
 	Path    tmp_path;
 	sint32  nodes_opened    = 0;
 
-	if (!FindPath(start, dest, tmp_path, cost, false, NODE_VISIT_COUNT_LIMIT, nodes_opened))
+	if (!FindPath(start, dest, tmp_path, cost, false, Astar_MaxSearchNodes(), nodes_opened))
 	{
 		cost     = static_cast<float>(g_player[m_owner]->GetMaxEmpireDistance());
 		distance = 0x7fffffff;
@@ -316,7 +316,7 @@ bool CityAstar::FindSimpleDistancePath
 
 	sint32 nodes_opened     = 0;
 
-	FindPath(start, dest, new_path, total_cost, false, NODE_VISIT_COUNT_LIMIT, nodes_opened);
+	FindPath(start, dest, new_path, total_cost, false, Astar_MaxSearchNodes(), nodes_opened);
 
 	return total_cost > 0.0;
 }
@@ -344,7 +344,7 @@ bool CityAstar::FindRoadPath
 
 	sint32 nodes_opened     = 0;
 
-	FindPath(start, dest, new_path, total_cost, false, NODE_VISIT_COUNT_LIMIT, nodes_opened);
+	FindPath(start, dest, new_path, total_cost, false, Astar_MaxSearchNodes(), nodes_opened);
 
 	return total_cost > 0.0;
 }

@@ -133,11 +133,21 @@ The build itself is pretty classing and straight forward:
 
 ```
 ./autogen.sh
-CFLAGS="$CFLAGS -O0 -fuse-ld=gold" CXXFLAGS="$CXXFLAGS -O0 -fuse-ld=gold" ./configure --enable-silent-rules
+CFLAGS="$CFLAGS -O3 -fuse-ld=gold" CXXFLAGS="$CXXFLAGS -O3 -fuse-ld=gold" ./configure --enable-silent-rules
 make -j$(nproc)
 ```
 
-If you want to build a debug version it is:
+Movie playback (e.g. the intro movie) requires passing `--enable-ffmpeg4movies` to `configure`, in addition to having the ffmpeg libraries installed - it is off by default because the FFmpeg API still changes a lot. Without it, the game builds and runs fine, it just won't play any movies.
+
+If you need logging and still an optimized version for long playtesting to figure out what the AI does for instance use:
+
+```
+./autogen.sh
+CFLAGS="$CFLAGS -O0 -fuse-ld=gold" CXXFLAGS="$CXXFLAGS -O0 -fuse-ld=gold" ./configure --enable-silent-rules --enable-logging
+make -j$(nproc)
+```
+
+If you need more such as memory leak detection, asserts and being able to use the debugger efficently use then build a debug version:
 
 ```
 ./autogen.sh
@@ -145,7 +155,7 @@ CFLAGS="$CFLAGS -g -O0 -fno-omit-frame-pointer -fuse-ld=gold" CXXFLAGS="$CXXFLAG
 make -j$(nproc)
 ```
 
-Most optimizations are completely disabled at -O0 even if individual optimization flags are specified. In case CTP2 becomes to slow to be useful you can use higher levels of optimization such as -O1, or -O2 however these have let to spurious segfaults, double free and other crashes of the game and therefore are not recommended here to start with.
+Most optimizations are completely disabled at -O0 even if individual optimization flags are specified. In case CTP2 becomes to slow to be useful you can use higher levels of optimization such as -O1, or -O2.
 
 With `make clean` you can delete all intermedia and output for a clean rebuild. You can look at `./configure` for more options, but there aren't many.
 

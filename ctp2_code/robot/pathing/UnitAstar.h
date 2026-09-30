@@ -76,6 +76,13 @@ protected:
 	MapPoint m_start;
 	MapPoint m_dest;
 
+	// m_check_dest itself stays private (see below); this exposes just a
+	// read-only view to subclasses (e.g. RobotAstar2's transport-specific
+	// EntryCost callbacks) that need to recognise the same "final
+	// destination does not need to be literally enterable" case that
+	// UnitAstar::EntryCost itself already special-cases.
+	bool GetCheckDest() const { return m_check_dest; }
+
 public:
 	UnitAstar();
 
@@ -85,6 +92,16 @@ public:
 	virtual void   RecalcEntryCost(AstarPoint * parent, AstarPoint * node, float & new_entry_cost, bool & new_is_zoc,
 				ASTAR_ENTRY_TYPE & entry);
 	virtual sint32 GetMaxDir(MapPoint & pos) const;
+
+	virtual PLAYER_INDEX GetOwner() const { return m_owner; }
+	virtual sint32 GetArmyId() const { return m_army.m_id; }
+
+	// Wraps g_theWorld->IsMoveZOC() so a subclass (RobotAstar2) can change
+	// how AI pathfinding treats ZOC without touching the underlying game
+	// rule used everywhere else (e.g. move-execution validation). Always
+	// checks m_owner with is_check_only_visible set, the only way this
+	// class's callers use it.
+	virtual bool IsMoveZOC(const MapPoint & start, const MapPoint & dest) const;
 
 	bool FindPath(Army & army, const MapPoint & start, PLAYER_INDEX owner, const MapPoint & dest, Path & new_path,
 				bool & is_broken_path, Path & bad_path, float & total_cost);

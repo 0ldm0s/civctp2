@@ -7161,6 +7161,16 @@ void CityData::SetRoad() const
 	if (rec)
 	{
 		cell->InsertDBImprovement(rec->GetIndex());
+
+		if (rec->GetClassOceanRoad())
+		{
+			// SetRoad also runs outside of founding (e.g. once per city on
+			// every advance-gain via Player::SetCityRoads), so a newly
+			// eligible tunnel here needs the same deferred renumber as
+			// TerrainImprovementData::Complete uses for the general
+			// improvement-construction path.
+			g_theWorld->MarkContinentsDirty();
+		}
 	}
 #if 0
 	uint32 oenv = cell->GetEnv();
@@ -7595,8 +7605,8 @@ bool CityData::CanBuildBuilding(sint32 type) const
 					numCities++;
 			}
 
-			sint32 num;
-			sint32 percent;
+			sint32 num = 0;
+			sint32 percent = 0;
 			bool enoughNum     = false;
 			bool enoughPercent = false;
 
@@ -7780,7 +7790,7 @@ bool CityData::CanBuildBuilding(sint32 type) const
 	}
 
 	// added by E - some buildings can only be built once city reaches certain size
-	sint32 pop;
+	sint32 pop = 0;
 	if(rec->GetNeedsPopCountToBuild(pop))
 	{
 		if(PopCount() <= pop)
@@ -7927,7 +7937,8 @@ bool CityData::CanBuildWonder(sint32 type) const
 					numCities++;
 			}
 
-			sint32 num, percent;
+			sint32 num = 0;
+			sint32 percent = 0;
 
 			if(bf->GetNum(num))
 			{
@@ -9728,7 +9739,14 @@ void CityData::CollectOtherGold(const bool projectedOnly)
 
 	if(!projectedOnly)
 	{
-		g_player[m_owner]->m_gold->AddIncome(m_net_gold);
+		if (m_net_gold < 0)
+		{
+			g_player[m_owner]->m_gold->SubIncome(-m_net_gold);
+		}
+		else
+		{
+			g_player[m_owner]->m_gold->AddIncome(m_net_gold);
+		}
 	}
 }
 

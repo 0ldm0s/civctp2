@@ -329,6 +329,11 @@ void TurnCount::BeginNewRound()
 	m_activePlayers = 0;
 	sint32 i;
 
+	// Collapse any tunnel/canal improvements placed since the last round
+	// (CityData::SetRoad, TerrainImprovementData::Complete) into a single
+	// renumber here, instead of one full map recompute per improvement.
+	g_theWorld->FlushContinentsIfDirty();
+
 	m_round++;
 
 #ifdef _DEBUG
@@ -933,7 +938,7 @@ void TurnCount::NextRound(BOOL fromDirector, BOOL force)
 		g_noai_stop_player = g_selected_item->GetCurPlayer();
 	}
 
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(USE_LOGGING)
 sint32 finite_count=0;
 #endif
 

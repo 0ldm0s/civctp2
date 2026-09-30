@@ -126,7 +126,7 @@ template <class T> void DAPriorityQueue<T>::ShiftUp(const sint32 start_idx)
 
     sint32 current_idx = start_idx;
 
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(USE_LOGGING)
     sint32 finite_count=0;
 #endif
     while (1) {
@@ -156,7 +156,7 @@ template <class T> void DAPriorityQueue<T>::ShiftDown(const sint32 start_idx)
 
     sint32 current_idx = start_idx;
 
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(USE_LOGGING)
     sint32 finite_count=0;
 #endif
 
@@ -257,6 +257,11 @@ template <class T> T* DAPriorityQueue<T>::Remove(sint32 del_idx)
         m_queue.ShortenByOne();
 		Assert(ret->GetPriorityQueueIndex() < 0);
 
+        // The element moved into del_idx can violate the heap property
+        // either upward (if it is smaller than its new parent) or
+        // downward (if it is larger than a new child); these two cases
+        // are mutually exclusive, so trying both is safe and correct.
+        ShiftUp(del_idx);
         ShiftDown(del_idx);
 		Assert(ret->GetPriorityQueueIndex() < 0);
     }

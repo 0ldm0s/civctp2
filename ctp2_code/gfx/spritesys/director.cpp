@@ -107,6 +107,7 @@ extern bool g_doingFastRounds;
 #define k_ELAPSED_CEILING 100
 
 enum DQACTION_TYPE {
+	DQACTION_INVALID = -1,
 	DQACTION_MOVE,
 	DQACTION_MOVEPROJECTILE,
 	DQACTION_SPECEFFECT,
@@ -699,6 +700,7 @@ public:
 	virtual void AddInvokeThroneRoom();
 	virtual void AddInvokeResearchAdvance(const MBCHAR *text);
 	virtual void AddBeginScheduler(sint32 player);
+	virtual void FlushPendingBeginScheduler();
 
 	// Animations
 	virtual void AddTradeRouteAnimation(const TradeRoute &tradeRoute);
@@ -758,6 +760,12 @@ private:
 
 	sint32                            m_lastPlayer;
 	sint32                            m_lastRound;
+
+	// Set for a player when AddBeginScheduler(player) is called while
+	// player isn't the currently active one (e.g. a diplomacy negotiation
+	// concludes for them during a different player's turn). Consumed by
+	// FlushPendingBeginScheduler() once that player's turn becomes current.
+	bool                              m_pendingBeginScheduler[k_MAX_PLAYERS];
 };
 
 Director* Director::CreateDirector() {
@@ -1393,9 +1401,11 @@ public:
 
 	virtual void Dump()
 	{
+#if defined(_DEBUG) || defined(USE_LOGGING)
 		DPRINTF(k_DBG_UI, ("Combat Flash\n"));
 		const MapPoint pos = m_activeActor->GetMapPos();
 		DPRINTF(k_DBG_UI, ("  flashPosition          :%d,%d\n", pos.x, pos.y));
+#endif
 	}
 };
 
@@ -1430,11 +1440,13 @@ public:
 
 	virtual void Dump()
 	{
+#if defined(_DEBUG) || defined(USE_LOGGING)
 		DPRINTF(k_DBG_UI, ("Special Effect\n"));
 		const MapPoint pos = m_activeActor->GetMapPos();
 		DPRINTF(k_DBG_UI, ("  position               :%d,%d\n", pos.x, pos.y));
 		DPRINTF(k_DBG_UI, ("  spriteID               :%d\n", spriteID));
 		DPRINTF(k_DBG_UI, ("  soundID                :%d\n", soundID));
+#endif
 	}
 protected:
 	sint32 spriteID;
@@ -2242,6 +2254,7 @@ DirectorImpl::DirectorImpl()
 		m_lastRound          (-1)
 {
 	std::fill(m_timeLog, m_timeLog + k_TIME_LOG_SIZE, 0);
+	std::fill(m_pendingBeginScheduler, m_pendingBeginScheduler + k_MAX_PLAYERS, false);
 
 	delete m_instance;
 	m_instance = this;
@@ -2468,7 +2481,7 @@ void DirectorImpl::FinalizeAnimatingActions()
 
 void DirectorImpl::ExternalActionFinished(DEACTION_TYPE externalActionType)
 {
-	DQACTION_TYPE actionType;
+	DQACTION_TYPE actionType = DQACTION_INVALID;
 	switch(externalActionType) {
 		case DEA_BEGIN_SCHEDULER:
 			actionType = DQACTION_BEGIN_SCHEDULER;
@@ -3072,8 +3085,20 @@ void DirectorImpl::AddInvokeResearchAdvance(const MBCHAR *message)
 
 void DirectorImpl::AddBeginScheduler(sint32 player)
 {
-	Assert(player == g_selected_item->GetCurPlayer());
-	if (player != g_selected_item->GetCurPlayer()) {
+	if (player != g_selected_item->GetCurPlayer())
+	{
+		DPRINTF(k_DBG_SCHEDULER, ("PLAYER_SYNC: AddBeginScheduler(%d) deferred, curPlayer=%d\n",
+		                          player, g_selected_item->GetCurPlayer()));
+
+		// A diplomacy negotiation (or other deferred event) can conclude
+		// for a player after the currently active player has already
+		// moved on. Defer the request instead of dropping it - it fires
+		// once FlushPendingBeginScheduler() sees this player become the
+		// active one.
+		if (player >= 0 && player < k_MAX_PLAYERS)
+		{
+			m_pendingBeginScheduler[player] = true;
+		}
 		return;
 	}
 
@@ -3081,6 +3106,17 @@ void DirectorImpl::AddBeginScheduler(sint32 player)
 
 	DQActionBeginScheduler *action = new DQActionBeginScheduler(player);
 	m_actionQueue->AddTail(action);
+}
+
+void DirectorImpl::FlushPendingBeginScheduler()
+{
+	sint32 const player = g_selected_item->GetCurPlayer();
+	if (player >= 0 && player < k_MAX_PLAYERS && m_pendingBeginScheduler[player])
+	{
+		DPRINTF(k_DBG_SCHEDULER, ("PLAYER_SYNC: FlushPendingBeginScheduler firing deferred AddBeginScheduler(%d)\n", player));
+		m_pendingBeginScheduler[player] = false;
+		AddBeginScheduler(player);
+	}
 }
 
 

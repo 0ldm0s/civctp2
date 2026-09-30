@@ -57,6 +57,7 @@
 
 #include "TerrainRecord.h"
 #include "UnitData.h"
+#include "ConstRecord.h"        // g_theConstDB
 
 #include "UnseenCell.h"
 #include "wonderutil.h"
@@ -70,6 +71,7 @@ namespace
 #endif
 	// Will generate a truncation warning, but only once.
 	sint16 const    MARK_UNUSED16   = static_cast<sint16>(MARK_UNUSED);
+	sint32 const    MARK_UNUSED32   = static_cast<sint32>(MARK_UNUSED);
 #if defined(_MSC_VER)
 #pragma warning(default:4309)
 #endif
@@ -78,6 +80,11 @@ namespace
 UnitAstar::UnitAstar()
 {
 	ClearMem();
+}
+
+bool UnitAstar::IsMoveZOC(const MapPoint & start, const MapPoint & dest) const
+{
+	return g_theWorld->IsMoveZOC(m_owner, start, dest, true);
 }
 
 //----------------------------------------------------------------------------
@@ -149,7 +156,7 @@ bool UnitAstar::StraightLine
 float UnitAstar::ComputeValidMoveCost(const MapPoint & pos, const Cell & cell) const
 {
 	if (m_move_intersection & k_Unit_MovementType_Air_Bit) {
-		return k_MOVE_AIR_COST;
+		return static_cast<float>(g_theConstDB->Get(0)->GetMoveAirCost());
 	}
 
 	bool const is_tunnel_and_boat = g_theWorld->IsTunnel(pos) &&
@@ -157,8 +164,9 @@ float UnitAstar::ComputeValidMoveCost(const MapPoint & pos, const Cell & cell) c
 			(m_move_intersection & k_Unit_MovementType_ShallowWater_Bit));
 	if (is_tunnel_and_boat)
 	{
-		sint32 icost_without_tunnel;
-		(void) g_theWorld->GetTerrain(pos)->GetEnvBase()->GetMovement(icost_without_tunnel);
+		// The cost the boat would pay for this terrain if it ignored the
+		// tunnel improvement, i.e. the terrain's base movement cost.
+		sint32 const icost_without_tunnel = g_theWorld->GetCell(pos)->GetBaseMoveCosts();
 		return std::min(m_army_minmax_move, static_cast<float>(icost_without_tunnel));
 	}
 
@@ -284,7 +292,7 @@ bool UnitAstar::CheckUnits(
 				{
 					if (CanMoveIntoTransports(m_dest))
 					{
-						cost = k_MOVE_ENTER_TRANSPORT_COST;
+						cost = static_cast<float>(g_theConstDB->Get(0)->GetMoveEnterTransportCost());
 						entry = ASTAR_CAN_ENTER;
 						can_enter = true;
 						return true;
@@ -496,7 +504,7 @@ bool UnitAstar::CheckMoveUnion(const MapPoint & prev, const MapPoint & pos, cons
 			}
 		}
 
-		if (can_be_zoc && g_theWorld->IsMoveZOC (m_owner, prev, pos, true) &&
+		if (can_be_zoc && IsMoveZOC(prev, pos) &&
 		    !IsBeachLanding(prev,pos,m_move_intersection)
 		   )
 		{
@@ -522,12 +530,12 @@ bool UnitAstar::CheckMoveIntersection(const MapPoint & prev, const MapPoint & po
 {
 	if (m_move_intersection & k_Unit_MovementType_Air_Bit)
 	{
-		cost = k_MOVE_AIR_COST;
+		cost = static_cast<float>(g_theConstDB->Get(0)->GetMoveAirCost());
 		can_enter = true;
 	}
 	else if (the_pos_cell.CanEnter(m_move_intersection))
 	{
-		if (can_be_zoc && g_theWorld->IsMoveZOC (m_owner, prev, pos, true) &&
+		if (can_be_zoc && IsMoveZOC(prev, pos) &&
 			!IsBeachLanding(prev,pos,m_move_intersection))
 		{
 			is_zoc = true;
@@ -662,7 +670,7 @@ float UnitAstar::EstimateFutureCost(const MapPoint &pos, const MapPoint &dest)
 {
 	if (m_move_intersection & k_Unit_MovementType_Air_Bit)
 	{
-		return static_cast<float>(k_MOVE_AIR_COST * pos.NormalizedDistance(dest));
+		return static_cast<float>(g_theConstDB->Get(0)->GetMoveAirCost() * pos.NormalizedDistance(dest));
 	}
 
 	return Astar::EstimateFutureCost(pos, dest);
@@ -876,7 +884,7 @@ bool UnitAstar::FindBrokenPath(const MapPoint &start, const MapPoint &dest,
     else
     {
         sint32 nodes_opened = 0;
-        sint32 cutoff       = 2000000000;
+        sint32 cutoff       = Astar_MaxSearchNodes();
 
         if (Astar::FindPath(start, no_enter_pos, good_path, total_cost, false, cutoff, nodes_opened))
         {
@@ -976,10 +984,17 @@ bool UnitAstar::PretestDest_SameLandContinent(const MapPoint & start, const MapP
 
 bool UnitAstar::PretestDest_SameWaterContinent(const MapPoint & start, const MapPoint & dest) const
 {
-	const uint32 landBits = k_Unit_MovementType_Land_Bit | k_Unit_MovementType_Mountain_Bit;
-	const uint32 nonLandBits = k_Unit_MovementType_Air_Bit | k_Unit_MovementType_Space_Bit
-	                           | k_Unit_MovementType_Sea_Bit | k_Unit_MovementType_ShallowWater_Bit;
-	if (((m_move_intersection & landBits) != 0) && ((m_move_intersection & nonLandBits) == 0))
+	// Was accidentally given a copy of PretestDest_SameLandContinent's
+	// land-only gate during a "clean code" refactor (7c16b5ea0), instead
+	// of its own water-only one - the original Activision code gated
+	// this on the mover being purely naval (Sea/ShallowWater, nothing
+	// else), not purely land. That silently disabled this check for
+	// every real ship, since a ship's Sea_Bit made the copied gate's
+	// nonLandBits-must-be-0 requirement always fail.
+	const uint32 waterBits = k_Unit_MovementType_Sea_Bit | k_Unit_MovementType_ShallowWater_Bit;
+	const uint32 nonWaterBits = k_Unit_MovementType_Air_Bit | k_Unit_MovementType_Space_Bit
+	                           | k_Unit_MovementType_Land_Bit | k_Unit_MovementType_Mountain_Bit;
+	if (((m_move_intersection & waterBits) != 0) && ((m_move_intersection & nonWaterBits) == 0))
 	{
 		bool   start_is_land;
 		bool    dest_is_land;
@@ -1073,7 +1088,7 @@ bool UnitAstar::PretestDest_ZocEnterable(const MapPoint &start, const MapPoint &
 			}
 		}
 
-		if (!g_theWorld->IsMoveZOC (m_owner, neighbor, dest, true))
+		if (!IsMoveZOC(neighbor, dest))
 		{
 			return true;
 		}
@@ -1088,15 +1103,36 @@ bool UnitAstar::PretestDest(const MapPoint &start, const MapPoint &dest)
 	{
 		if (!g_player[m_owner]->IsExplored(dest))
 		{
+			DPRINTF(k_DBG_ASTAR, ("PATHFIND_DIAG: PretestDest rejected dest (%d,%d): not explored\n", dest.x, dest.y));
 			return false;
 		}
 	}
 
-	if (!PretestDest_Enterable         (start, dest)) return false;
-	if (!PretestDest_HasRoom           (start, dest)) return false;
-	if (!PretestDest_SameLandContinent (start, dest)) return false;
-	if (!PretestDest_SameWaterContinent(start, dest)) return false;
-	if (!PretestDest_ZocEnterable      (start, dest)) return false;
+	if (!PretestDest_Enterable(start, dest))
+	{
+		DPRINTF(k_DBG_ASTAR, ("PATHFIND_DIAG: PretestDest rejected dest (%d,%d): not enterable\n", dest.x, dest.y));
+		return false;
+	}
+	if (!PretestDest_HasRoom(start, dest))
+	{
+		DPRINTF(k_DBG_ASTAR, ("PATHFIND_DIAG: PretestDest rejected dest (%d,%d): no room\n", dest.x, dest.y));
+		return false;
+	}
+	if (!PretestDest_SameLandContinent(start, dest))
+	{
+		DPRINTF(k_DBG_ASTAR, ("PATHFIND_DIAG: PretestDest rejected dest (%d,%d): different land continent\n", dest.x, dest.y));
+		return false;
+	}
+	if (!PretestDest_SameWaterContinent(start, dest))
+	{
+		DPRINTF(k_DBG_ASTAR, ("PATHFIND_DIAG: PretestDest rejected dest (%d,%d): different water continent\n", dest.x, dest.y));
+		return false;
+	}
+	if (!PretestDest_ZocEnterable(start, dest))
+	{
+		DPRINTF(k_DBG_ASTAR, ("PATHFIND_DIAG: PretestDest rejected dest (%d,%d): every approach is zone-of-control blocked\n", dest.x, dest.y));
+		return false;
+	}
 
 	return true;
 }
@@ -1112,7 +1148,7 @@ bool UnitAstar::FindPath(Army &army,  MapPoint const & start,
 
 	InitArmy (army, nUnits, move_intersection, move_union, m_army_minmax_move);
 
-	sint32 cutoff       = 2000000000;
+	sint32 cutoff       = Astar_MaxSearchNodes();
 	sint32 nodes_opened = 0;
 	bool result = FindPath(army, nUnits, move_intersection, move_union,
 	                       start, owner, dest, good_path, is_broken_path, bad_path,
@@ -1158,10 +1194,17 @@ bool UnitAstar::FindPath(
 	Assert(VerifyMem());
 
 	bool result;
-	if (PretestDest(start, dest) &&
-			Astar::FindPath(start, dest, good_path, total_cost, false, cutoff, nodes_opened)) {
+	bool const pretestPassed = PretestDest(start, dest);
+	bool const searchSucceeded = pretestPassed &&
+			Astar::FindPath(start, dest, good_path, total_cost, false, cutoff, nodes_opened);
+	if (searchSucceeded) {
 		result = true;
 	} else {
+		DPRINTF(k_DBG_ASTAR, ("PATHFIND_DIAG: UnitAstar::FindPath failed from (%d,%d) to (%d,%d): %s, army 0x%lx move_union 0x%x move_intersection 0x%x\n",
+		                                 start.x, start.y, dest.x, dest.y,
+		                                 pretestPassed ? "PretestDest passed, full A* search failed"
+		                                               : "rejected by PretestDest before searching",
+		                                 m_army.m_id, move_union, move_intersection));
 		if (no_bad_path) {
 			result = false;
 		} else {
@@ -1222,14 +1265,14 @@ bool UnitAstar::VerifyMem() const
 {
 	if (m_move_union          == MARK_UNUSED)   return false;
 	if (m_move_intersection   == MARK_UNUSED)   return false;
-	if (m_max_dir             == MARK_UNUSED)   return false;
+	if (m_max_dir             == MARK_UNUSED32) return false;
 	if (m_mask_alliance       == MARK_UNUSED)   return false;
 	if (m_dest.x              == MARK_UNUSED16) return false;
 	if (m_dest.y              == MARK_UNUSED16) return false;
 	if (m_start.x             == MARK_UNUSED16) return false;
 	if (m_start.y             == MARK_UNUSED16) return false;
-	if (m_owner               == MARK_UNUSED)   return false;
-	if (m_nUnits              == MARK_UNUSED)   return false;
+	if (m_owner               == MARK_UNUSED32) return false;
+	if (m_nUnits              == MARK_UNUSED32) return false;
 	if (m_army.m_id           == MARK_UNUSED)   return false;
 	if (m_army_minmax_move    == -9999999.0f)   return false;
 
@@ -1256,7 +1299,7 @@ bool UnitAstar::CheckIsDangerForPos(const MapPoint & pos)
 		//Check for hostile army
 		CellUnitList * the_army = g_theWorld->GetArmyPtr(neighbor);
 
-		if (the_army && !the_army->IsCivilian())
+		if (the_army && the_army->CanAttackOrBombard())
 		{
 			const PLAYER_INDEX owner     = the_army->GetOwner();
 			const bool         isVisible = m_army->IsVisible(owner);

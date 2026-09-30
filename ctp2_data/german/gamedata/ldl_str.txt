@@ -94,7 +94,7 @@ str_ldl_CANCEL_OFFER_CAPS			"Angebot stornieren"
 str_ldl_No_item_selected_in_list		"Kein Objekt in der Liste gewählt!"
 str_ldl_Foreign_Attitude			"Gesinnung"
 str_ldl_Local					"Lokal"
-str_ldl_mp_dbase_out_of_synch			"Datenbanken oder Slic-Code sind nicht synchron.\n Kehre zur Lobby zurück."
+str_ldl_mp_dbase_out_of_synch			"Datenbanken oder Slic-Code sind nicht synchron. Kehre zur Lobby zurück."
 
 ##This is the latest batch from Add_str.txt 02-26-99##
 
@@ -2614,6 +2614,8 @@ str_ldl_SV_COUNTDOWN_SEQUENCE			"Gaia-Controller in %d Runden online ..."
 # Message Box
 str_ldl_MB_OK					"OK"
 str_ldl_MB_CANCEL				"Abbrechen"
+str_ldl_MB_Inspect				"Prüfen"
+str_ldl_MB_Continue				"Weiter"
 
 # Army Management
 str_ldl_ArmyManagement				"Truppenmanager"
@@ -2837,6 +2839,7 @@ str_ldl_CityWinUnitsTab				"Einheiten"
 
 # autosave string
 AUTOSAVE_NAME					"AUTOSAVE"
+AUTOSAVE_NAME_PREVIOUS					"AUTOSAVE2"
 
 TRADE_ROUTE_RESET				"Handelsweg zurücksetzen!"
 
@@ -3168,7 +3171,7 @@ str_tbl_ldl_RevoltInsurgents_Off		"Keine Barbaren durch Aufruhr"				# Revolting 
 str_tbl_ldl_BarbarianSpawnsBarbarian_On		"Barbaren vermehren sich"			# Entrenched barbs create more barbs
 str_tbl_ldl_BarbarianSpawnsBarbarian_Off	"Barbaren vermehren sich nicht"		# Entrenched barbs create more barbs
 str_tbl_ldl_GoldPerUnitSupport_On		"Einheitenunterhalt auch durch Gold"				# All pay thins int times unit support calculation
-str_tbl_ldl_GoldPerUnitSupport_Off		"Einheitenunterhalt nur durch Production"				# All pay thins int times unit support calculation
+str_tbl_ldl_GoldPerUnitSupport_Off		"Einheitenunterhalt nur durch Produktion"				# All pay thins int times unit support calculation
 str_tbl_ldl_GoldPerCity_On			"Stadunterhalt durch Gold"				# Everyone pays gold amount per city
 str_tbl_ldl_GoldPerCity_Off			"Kein Stadunterhalt durch Gold"				# AI pays gold amount per city
 str_tbl_ldl_Upgrade_On				"Einheiten modernisieren"			# Units can be upgraded

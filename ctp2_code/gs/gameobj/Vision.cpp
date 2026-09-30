@@ -121,6 +121,11 @@ void Vision::Clear()
 	m_unseenCells = new UnseenCellQuadTree(m_width, m_height, m_isYwrap);
 }
 
+void Vision::GarbageCollectUnseen()
+{
+	m_unseenCells->GarbageCollector();
+}
+
 void Vision::AddExplored(MapPoint pos, double radius)
 {
 	FillCircle(pos, radius, CIRCLE_OP_ADD); // makes also visible, i.e. removes ucell from m_unseenCells
@@ -582,6 +587,11 @@ void Vision::DoFillCircleOp(const MapPoint &posRC, CIRCLE_OP op,
 		}
 		case CIRCLE_OP_SUBTRACT:{
 
+			if(((*entry) & k_VISIBLE_REFERENCE_MASK) == 0)
+			{
+				DPRINTF(k_DBG_FIX, ("Vision::DoFillCircleOp: SUBTRACT underflow for player %d at cell (%d,%d), entry 0x%x\n",
+				                    m_owner, pos.x, pos.y, (unsigned)(*entry)));
+			}
 			Assert(((*entry) & k_VISIBLE_REFERENCE_MASK) != 0);
 
 			if ((*entry) & k_VISIBLE_REFERENCE_MASK)

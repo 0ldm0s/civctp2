@@ -113,6 +113,7 @@ World::World(const MapPoint & m, const int xw, const int yw)
     CityRadiusCallback      (),
     m_isYwrap               (yw),
     m_isXwrap               (xw),
+    m_continents_dirty      (FALSE),
     m_mapGenerator          (MAP_GENERATOR_PLUGIN),
     m_size                  (m),
     m_map                   (NULL),
@@ -210,6 +211,7 @@ void World::CreateTheWorld(MapPoint player_start_list[k_MAX_PLAYERS],
 
 World::World(CivArchive &archive, BOOL fromMapFile)
 :
+    m_continents_dirty      (FALSE),
     m_mapGenerator          (MAP_GENERATOR_PLUGIN),
     m_map                   (NULL),
     m_water_next_too_land   (NULL),
@@ -918,7 +920,8 @@ bool World::IsNextToForeigner(const MapPoint &pos, PLAYER_INDEX owner) const
 			Cell * cell = g_theWorld->GetCell(next);
 
 			if(cell->GetNumUnits() > 0
-			&& cell->UnitArmy()->GetOwner() != owner)
+			&& cell->UnitArmy()->GetOwner() != owner
+			&& cell->UnitArmy()->CanAttackOrBombard())
 			{
 				return true;
 			}
@@ -933,7 +936,8 @@ bool World::IsOccupiedByForeigner(const MapPoint &pos, PLAYER_INDEX owner) const
 	Cell * cell = g_theWorld->GetCell(pos);
 
 	return (cell->GetNumUnits() > 0)
-		&& (cell->UnitArmy()->GetOwner() != owner);
+		&& (cell->UnitArmy()->GetOwner() != owner)
+		&& (cell->UnitArmy()->CanAttackOrBombard());
 }
 
 bool World::GetAdjacentOcean(const MapPoint &pos, sint32 & water_cont) const
@@ -946,7 +950,7 @@ bool World::GetAdjacentOcean(const MapPoint &pos, sint32 & water_cont) const
 		{
 			if(IsWater(water))
 			{
-				water_cont = GetCell(water)->GetContinent();
+				water_cont = GetCell(water)->GetWaterContinent();
 
 				if(GetWaterContinentSize(water_cont) > 25)
 					return true;

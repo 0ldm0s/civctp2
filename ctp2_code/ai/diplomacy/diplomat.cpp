@@ -60,7 +60,7 @@
 #include <functional>
 
 #include "c3errors.h"
-#include "MoveFlags.h"
+#include "ConstRecord.h"        // g_theConstDB
 #include "MapPoint.h"
 #include "player.h"
 #include "Events.h"
@@ -1134,6 +1134,14 @@ void Diplomat::LogViolationEvent(const PLAYER_INDEX foreignerId, const PROPOSAL_
 			so->AddCivilisation(m_playerId) ;
 			so->AddRecipient(foreignerId);
 			g_slicEngine->Execute(so) ;
+
+			//// inform the other party, taken from AgreementData.cpp, see https://github.com/civctp2/civctp2/issues/162
+			char objName[256];
+			sprintf(objName, "%sVictim", trust_message);
+			SlicObject *so2 = new SlicObject(objName);
+			so2->AddCivilisation(foreignerId);
+			so2->AddRecipient(m_playerId);
+			g_slicEngine->Execute(so2) ;
 		}
 
 		const DiplomacyProposalRecord * rec = g_theDiplomacyProposalDB->Get(s_proposalTypeToElemIndex[proposal_type]);
@@ -1636,12 +1644,14 @@ void Diplomat::Execute_Proposal(const PLAYER_INDEX & sender,
 		break;
 	case PROPOSAL_OFFER_GIVE_GOLD:
 
+		// Deduct synchronously, right where the affordable amount is
+		// clamped - a deferred GEV_SubGold left a window for an earlier
+		// gold-costing proposal/response in the same processing batch to
+		// drain the balance first, making this already-computed amount
+		// stale by the time it actually ran, tripping Gold::SubGold's
+		// assert (reproduced in a Windows run).
 		gold = std::min(proposal_arg.gold, g_player[sender]->m_gold->GetLevel());
-
-		g_gevManager->AddEvent(GEV_INSERT_Tail, GEV_SubGold,
-			GEA_Player, sender,
-			GEA_Int, gold,
-			GEA_End);
+		g_player[sender]->m_gold->SubGold(gold);
 
 		g_gevManager->AddEvent(GEV_INSERT_Tail, GEV_AddGold,
 			GEA_Player, receiver,
@@ -1650,12 +1660,9 @@ void Diplomat::Execute_Proposal(const PLAYER_INDEX & sender,
 		break;
 	case PROPOSAL_REQUEST_GIVE_GOLD:
 
+		// Same reasoning as PROPOSAL_OFFER_GIVE_GOLD above.
 		gold = std::min(proposal_arg.gold, g_player[receiver]->m_gold->GetLevel());
-
-		g_gevManager->AddEvent(GEV_INSERT_Tail, GEV_SubGold,
-			GEA_Player, receiver,
-			GEA_Int, gold,
-			GEA_End);
+		g_player[receiver]->m_gold->SubGold(gold);
 
 		g_gevManager->AddEvent(GEV_INSERT_Tail, GEV_AddGold,
 			GEA_Player, sender,
@@ -1716,8 +1723,12 @@ void Diplomat::Execute_Proposal(const PLAYER_INDEX & sender,
 			AgreementMatrix::s_agreements.
 				CancelAgreement(sender, receiver, PROPOSAL_TREATY_DECLARE_WAR);
 	
-			Diplomat::GetDiplomat(sender).UpdateDesireWarWith(receiver);
-			Diplomat::GetDiplomat(receiver).UpdateDesireWarWith(sender);
+			// A war ending can change who's the "weakest enemy" among
+			// each side's remaining wars (IsBestHotwarEnemy compares
+			// across all of them), so a single-entry refresh isn't
+			// enough - recompute the whole cache for both sides.
+			Diplomat::GetDiplomat(sender).ComputeAllDesireWarWith();
+			Diplomat::GetDiplomat(receiver).ComputeAllDesireWarWith();
 
 			// Maybe add to CancelAgreement as message from DB
 			SlicObject *so = new SlicObject("401WarOver");
@@ -1750,19 +1761,19 @@ void Diplomat::DeclareWar(const PLAYER_INDEX foreignerId)
 {
 	Player * player_ptr = g_player[m_playerId];
 	Player * foreigner_ptr = g_player[foreignerId];
-	bool NO_CONTACT_DECLARE_WAR = false;
 
 	if (foreignerId != 0)
 	{
-		if (!player_ptr || !player_ptr->HasContactWith(foreignerId))
+		// Stealth actions (pillage, nuking, park creation, ...) can trigger a
+		// war-declaring violation before the two sides have ever made
+		// contact (the victim only knows the perpetrator's identity, not
+		// that they've met them) - there is nothing to declare war on yet.
+		if (!player_ptr || !player_ptr->HasContactWith(foreignerId) ||
+		    !foreigner_ptr || !foreigner_ptr->HasContactWith(m_playerId))
 		{
-			Assert(NO_CONTACT_DECLARE_WAR)
-			return;
-		}
-
-		if (!foreigner_ptr || !foreigner_ptr->HasContactWith(m_playerId))
-		{
-			Assert(NO_CONTACT_DECLARE_WAR)
+			DPRINTF(k_DBG_GAMESTATE,
+				("Diplomat::DeclareWar: no contact between player %d and %d - skipping war declaration\n",
+				 m_playerId, foreignerId));
 			return;
 		}
 	}
@@ -1839,8 +1850,12 @@ void Diplomat::DeclareWar(const PLAYER_INDEX foreignerId)
 	player_ptr->CloseEmbassy(foreignerId);
 	foreigner_ptr->CloseEmbassy(m_playerId);
 
-	Diplomat::GetDiplomat(foreignerId).UpdateDesireWarWith(m_playerId);
-	UpdateDesireWarWith(foreignerId);
+	// Starting a new war can change who's the "weakest enemy" among
+	// each side's existing wars too (IsBestHotwarEnemy compares across
+	// all of them), so a single-entry refresh isn't enough - recompute
+	// the whole cache for both sides.
+	Diplomat::GetDiplomat(foreignerId).ComputeAllDesireWarWith();
+	ComputeAllDesireWarWith();
 }
 
 void Diplomat::SetEmbargo(const PLAYER_INDEX foreignerId, const bool state)
@@ -2865,6 +2880,8 @@ void Diplomat::ContinueDiplomacy(const PLAYER_INDEX & foreignerId) {
 			if(!g_network.IsActive() ||
 			   (g_network.IsHost() && g_network.IsLocalPlayer(m_playerId)))
 			{
+				DPRINTF(k_DBG_SCHEDULER, ("PLAYER_SYNC: ContinueDiplomacy(%d) with foreigner %d concluding, curPlayer=%d\n",
+				                          m_playerId, foreignerId, g_selected_item->GetCurPlayer()));
 				g_director->AddBeginScheduler(m_playerId);
 			}
 		}
@@ -3312,7 +3329,7 @@ sint32 Diplomat::GetAcceptPriority(const PLAYER_INDEX foreignerId,
 
 	const DiplomacyRecord::ProposalElement * elem =
 	    m_diplomacy[foreignerId].GetProposalElement(s_proposalTypeToElemIndex[proposalType]);
-	sint32 value;
+	sint32 value = std::numeric_limits<sint32>::min();
 	elem->GetAcceptPriority(value);
 	return value;
 }
@@ -3325,7 +3342,7 @@ sint32 Diplomat::GetRejectPriority(const PLAYER_INDEX foreignerId,
 	const DiplomacyRecord::ProposalElement * elem =
 	    m_diplomacy[foreignerId].GetProposalElement(s_proposalTypeToElemIndex[proposalType]);
 
-	sint32 value;
+	sint32 value = std::numeric_limits<sint32>::min();
 	elem->GetRejectPriority(value);
 	return value;
 }
@@ -3338,7 +3355,7 @@ sint32 Diplomat::GetSenderRegardResult(const PLAYER_INDEX foreignerId,
 	const DiplomacyRecord::ProposalElement * elem =
 		m_diplomacy[foreignerId].GetProposalElement(s_proposalTypeToElemIndex[proposalType]);
 
-	sint32 value;
+	sint32 value = 0;
 	elem->GetSenderRegardResult(value);
 	return value;
 }
@@ -3354,7 +3371,7 @@ sint32 Diplomat::GetReceiverRegardResult(const PLAYER_INDEX foreignerId,
 	Assert(elem);
 	if(!elem) return 0;
 
-	sint32 value;
+	sint32 value = 0;
 	elem->GetReceiverRegardResult(value);
 	return value;
 }
@@ -3367,7 +3384,7 @@ sint32 Diplomat::GetViolationRegardCost(const PLAYER_INDEX foreignerId,
 	const DiplomacyRecord::ProposalElement * elem =
 		m_diplomacy[foreignerId].GetProposalElement(s_proposalTypeToElemIndex[proposalType]);
 
-	sint32 value;
+	sint32 value = 0;
 	elem->GetViolationRegardCost(value);
 	return value;
 }
@@ -3380,7 +3397,7 @@ sint32 Diplomat::GetViolationTrustCost(const PLAYER_INDEX foreignerId,
 	const DiplomacyRecord::ProposalElement * elem =
 		m_diplomacy[foreignerId].GetProposalElement(s_proposalTypeToElemIndex[proposalType]);
 
-	sint32 value;
+	sint32 value = 0;
 	elem->GetViolationTrustCost(value);
 	return value;
 }
@@ -4467,7 +4484,7 @@ bool Diplomat::GetTradeRoutePiracyRisk(const Unit & source_city, const Unit & de
 	Player * player_ptr = g_player[m_playerId];
 	Assert(player_ptr);
 
-	sint32 max_piracy_events;
+	sint32 max_piracy_events = 3; // Original value in strategies.txt
 	GetCurrentStrategy().GetMaxPiracyEvents(max_piracy_events);
 
 	sint32 num_cities = player_ptr->m_all_cities->Num();
@@ -4503,7 +4520,7 @@ void Diplomat::ComputeTradeRoutePiracyRisk()
 
 	sint32 cur_round = player_ptr->GetCurRound();
 
-	sint32 piracy_memory_turns;
+	sint32 piracy_memory_turns = 3; // Original value in strategies.txt, even so diplomats remember twice as long
 	GetCurrentStrategy().GetPiracyMemoryTurns(piracy_memory_turns);
 
 	sint32 num_cities = player_ptr->m_all_cities->Num();
@@ -4852,7 +4869,7 @@ void Diplomat::TargetNuclearAttack(const PLAYER_INDEX foreignerId, const bool la
 			if (closest_nuke_iter != weapon_list.end())
 			{
 				sint32 nuke_range = static_cast<sint32>
-					((*closest_nuke_iter).GetDBRec()->GetMaxMovePoints() / k_MOVE_AIR_COST) - 5;
+					((*closest_nuke_iter).GetDBRec()->GetMaxMovePoints() / g_theConstDB->Get(0)->GetMoveAirCost()) - 5;
 				close_enough = ((nuke_range * nuke_range) > closest_nuke_dist);
 			}
 

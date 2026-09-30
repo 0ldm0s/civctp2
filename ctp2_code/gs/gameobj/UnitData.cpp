@@ -125,7 +125,6 @@
 #include "installation.h"
 #include "installationtree.h"
 #include "MaterialPool.h"
-#include "MoveFlags.h"
 #include "net_action.h"
 #include "net_info.h"
 #include "net_unit.h"
@@ -473,7 +472,7 @@ bool UnitData::DeductMoveCost(const Unit &me, const double cost, bool &out_of_fu
 {
 	const UnitRecord *rec = GetDBRec();
 
-	sint32 bonus;
+	sint32 bonus = 0;
 	if(rec->GetMoveBonus(bonus))
 	{
 		m_movement_points -= bonus;
@@ -882,10 +881,10 @@ bool UnitData::IsMovePointsEnough(const MapPoint &pos) const
 		return true;
 	} else {
 		double cost;
-		sint32 fixMoveCosts;
+		sint32 fixMoveCosts = 0;
 
 		if (GetDBRec()->GetMovementTypeAir() ) {
-			cost = k_MOVE_AIR_COST;
+			cost = g_theConstDB->Get(0)->GetMoveAirCost();
 		} else if(GetDBRec()->GetMoveBonus(fixMoveCosts)) {
 			cost = static_cast<double>(fixMoveCosts);
 
@@ -894,7 +893,7 @@ bool UnitData::IsMovePointsEnough(const MapPoint &pos) const
 		          !GetDBRec()->GetMovementTypeLand()
 		          )
 		{
-			sint32 icost;
+			sint32 icost = std::numeric_limits<sint32>::max();
 			g_theWorld->GetTerrain(pos)->GetEnvBase()->GetMovement(icost);
 			cost = icost;
 		} else {
@@ -1014,6 +1013,20 @@ bool UnitData::CanThisCargoUnloadAt
 	     && the_cargo.GetDBRec()->GetCantCaptureCity()
 	   )
 	{
+		return false;
+	}
+
+	if (    the_dest->HasCity()
+	     && g_theWorld->IsWater(unload_pos)
+	     && !GetDBRec()->GetIsSubmarine()
+	   )
+	{
+		// Only a submarine transport (e.g. the Crawler) can deliver land
+		// units directly into an underwater city - see
+		// Great_Library.txt's UNIT_CRAWLER_GAMEPLAY entry and
+		// https://github.com/civctp2/civctp2/issues/334. This is about
+		// the transport itself, not the cargo, so it's independent of
+		// the CantCaptureCity check above.
 		return false;
 	}
 
@@ -3002,6 +3015,8 @@ void UnitData::BeginTurn()
 
 	Assert(!Flag(k_UDF_USED_SPECIAL_ACTION_JUST_NOW));
 	if(Flag(k_UDF_USED_SPECIAL_ACTION_JUST_NOW)) {
+		DPRINTF(k_DBG_SPECIAL_ACTION, ("SPECIAL_ACTION: stuck k_UDF_USED_SPECIAL_ACTION_JUST_NOW on unit id 0x%lx, type %s, owner %d\n",
+		                          m_id, g_theStringDB->GetIdStr(g_theUnitDB->GetName(m_type)), m_owner));
 		ClearFlag(k_UDF_USED_SPECIAL_ACTION_JUST_NOW);
 		needsEnqueue = true;
 	}
@@ -3061,6 +3076,11 @@ void UnitData::BeginTurn()
 	// End EMOD
 }
 
+double UnitData::CalcFuelUpkeep() const
+{
+	return g_theConstDB->Get(0)->GetNonSpaceFuelCost() * (m_movement_points / g_theConstDB->Get(0)->GetMoveAirCost());
+}
+
 void UnitData::EndTurn()
 {
 	const UnitRecord *rec = GetDBRec();
@@ -3093,7 +3113,7 @@ void UnitData::EndTurn()
 
 	if(rec->GetNoFuelThenCrash()) {
 		if(!CheckForRefuel() && !Flag(k_UDF_IN_SPACE)) {
-			m_fuel -= g_theConstDB->Get(0)->GetNonSpaceFuelCost() * sint32(m_movement_points / 100.0);
+			m_fuel -= static_cast<sint32>(CalcFuelUpkeep());
 
 			if(m_fuel <= 0) {
 				Unit me(m_id);
@@ -5323,6 +5343,16 @@ void UnitData::SetType(sint32 type)
 {
 	DPRINTF(k_DBG_GAMESTATE, ("Update unit 0x%lx From type %d to type %d @ (%d,%d), turn=%d\n", m_id, m_type, type, m_pos.x, m_pos.y, g_player[m_owner]->m_current_round));
 
+	// A type change (e.g. an upgrade) can change GetVisionRange(), since that
+	// reads GetDBRec()->GetVisionRange() for the (about to be old) type. If we
+	// don't resync here, the Vision grid keeps the reference counts added for
+	// the old radius, while a later RemoveUnitVision() will look up the NEW
+	// radius via GetVisionRange() and try to remove cells that were never
+	// added - see CityData::AdjustSizeIndices for the same pattern used for
+	// city-size-driven vision changes.
+	bool const hadVision = Flag(k_UDF_VISION_ADDED);
+	double const oldVisionRange = GetVisionRange();
+
 	if(GetDBRec()->GetUpgradeDoesNotHeal()) //This stuff preserves the hp,fuel, and movement points of the unit if flag is present.
 	{
 		sint32 prevTotalHP = CalculateTotalHP();
@@ -5355,6 +5385,12 @@ void UnitData::SetType(sint32 type)
 	ClearFlag(k_UDF_FIRST_MOVE); // Clear flag: Upgraded unit maybe mobile
 	if(!IsImmobile() && m_movement_points > 0) //Don't let it move if it has no movement points!!!
 		SetFlag(k_UDF_FIRST_MOVE);
+
+	if(hadVision && GetVisionRange() != oldVisionRange)
+	{
+		RemoveOldUnitVision(oldVisionRange);
+		AddUnitVision();
+	}
 
 	const UnitRecord *rec = GetDBRec();
 	if(m_cargo_list)
@@ -5985,6 +6021,13 @@ void UnitData::RemoveUnitVision()
 {
 	Assert(Flag(k_UDF_VISION_ADDED));
 	if(Flag(k_UDF_VISION_ADDED)) {
+#if defined(_DEBUG) || defined(USE_LOGGING)
+		if(m_visionAddedOwner != m_owner || m_visionAddedPos != m_pos || m_visionAddedRadius != GetVisionRange())
+		{
+			DPRINTF(k_DBG_FIX, ("UnitData::RemoveUnitVision: MISMATCH unit 0x%lx addedOwner %d nowOwner %d addedPos (%d,%d) nowPos (%d,%d) addedRadius %f nowRadius %f\n",
+			                    m_id, m_visionAddedOwner, m_owner, m_visionAddedPos.x, m_visionAddedPos.y, m_pos.x, m_pos.y, m_visionAddedRadius, GetVisionRange()));
+		}
+#endif
 		g_player[m_owner]->RemoveUnitVision(m_pos, (GetVisionRange()));
 		ClearFlag(k_UDF_VISION_ADDED);
 	}
@@ -5994,6 +6037,13 @@ void UnitData::RemoveOldUnitVision(double oldRadius)
 {
 	Assert(Flag(k_UDF_VISION_ADDED));
 	if(Flag(k_UDF_VISION_ADDED)) {
+#if defined(_DEBUG) || defined(USE_LOGGING)
+		if(m_visionAddedOwner != m_owner || m_visionAddedPos != m_pos || m_visionAddedRadius != oldRadius)
+		{
+			DPRINTF(k_DBG_FIX, ("UnitData::RemoveOldUnitVision: MISMATCH unit 0x%lx addedOwner %d nowOwner %d addedPos (%d,%d) nowPos (%d,%d) addedRadius %f suppliedOldRadius %f\n",
+			                    m_id, m_visionAddedOwner, m_owner, m_visionAddedPos.x, m_visionAddedPos.y, m_pos.x, m_pos.y, m_visionAddedRadius, oldRadius));
+		}
+#endif
 		g_player[m_owner]->RemoveUnitVision(m_pos, oldRadius);
 		ClearFlag(k_UDF_VISION_ADDED);
 	}
@@ -6006,6 +6056,11 @@ void UnitData::AddUnitVision()
 		double radius = GetVisionRange();
 		g_player[m_owner]->AddUnitVision(m_pos, radius);
 		SetFlag(k_UDF_VISION_ADDED);
+#if defined(_DEBUG) || defined(USE_LOGGING)
+		m_visionAddedOwner  = m_owner;
+		m_visionAddedPos    = m_pos;
+		m_visionAddedRadius = radius;
+#endif
 	}
 }
 

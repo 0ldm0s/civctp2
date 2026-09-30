@@ -37,6 +37,7 @@
 #include "AVLHeap.h"
 #include "Path.h"
 #include "World.h"
+#include "ctpaidebug.h"
 
 #ifdef PRINT_COSTS
 #include "gfx_options.h"
@@ -56,6 +57,11 @@ void Astar_Init()
 void Astar_Cleanup()
 {
 	g_astar_mem.CleanUp();
+}
+
+sint32 Astar_MaxSearchNodes()
+{
+	return 2 * g_theWorld->GetXWidth() * g_theWorld->GetYHeight();
 }
 
 #define k_MIN_MOVE_COST 10.0
@@ -95,7 +101,12 @@ void Astar::DecayOrtho(AstarPoint *parent, AstarPoint *point, float &new_entry_c
 
 	if (is_ortho)
 	{
-		new_entry_cost = point->m_entry_cost * 0.95f;
+		// Decay the freshly computed edge cost, not the node's old stored
+		// m_entry_cost - reading the stale value here made every reopen of
+		// an orthogonal neighbor shrink its cost by another 5% regardless
+		// of the actual new edge cost, always looking like an improvement
+		// and reopening the same tile until it hit k_ASTAR_MAX_REOPENS.
+		new_entry_cost = new_entry_cost * 0.95f;
 	}
 }
 
@@ -275,6 +286,14 @@ bool Astar::FindPath
 		return Cleanup(dest, a_path, total_cost, isunit, best);
 	}
 
+	// A long-distance search over uniform-cost terrain legitimately ties a
+	// huge number of tiles, so any one of them can end up reopened many
+	// times as the frontier of near-equal-cost candidates expands. The
+	// number of tied candidates in an open 2D area grows roughly with the
+	// square of the distance, not linearly with it, so scale the safety
+	// cap the same way instead of using one flat number for every search.
+	sint32 const    maxReopens  = k_ASTAR_MAX_REOPENS + MapPoint::GetSquaredDistance(start, dest);
+
 	Cell *          c           = g_theWorld->GetCell(start);
 	Assert(c);
 	if (!c)
@@ -289,6 +308,7 @@ bool Astar::FindPath
 
 	c->m_point = g_astar_mem.GetNew();
 	c->m_search_count = g_search_count;
+	c->m_point->m_reopen_count = 0;
 
 	if (!InitPoint(NULL, c->m_point, start, 0.0, dest))
 	{
@@ -331,6 +351,7 @@ bool Astar::FindPath
 				ASTAR_ENTRY_TYPE	bType;		// entry type from best
 				if (EntryCost(best->m_pos, next_pos, bMove, bZoc, bType))
 				{
+					float const		rawMove	= bMove;
 					DecayOrtho(best, c->m_point, bMove);
 
 					float const		oldG	=
@@ -339,6 +360,38 @@ bool Astar::FindPath
 
 					if (bestG < oldG && (c->m_point->m_parent == NULL || c->m_point != best->m_parent))
 					{
+						// Only log the final few reopens right before the
+						// Assert below trips, showing the exact cost sequence
+						// (raw vs decayed edge cost, oldG vs bestG) that pushed
+						// it over the edge. Plenty of searches reopen a tile
+						// more than a handful of times without ever being a
+						// real problem, so logging from a low threshold
+						// floods the log with routine, uninteresting reopens.
+						if (c->m_point->m_reopen_count > maxReopens - 5)
+						{
+							AI_DPRINTF(k_DBG_ASTAR, GetOwner(), -1, GetArmyId(),
+							    ("REOPEN_DIAG: tile (%d,%d) reopen #%d via parent (%d,%d): oldG=%.3f bestG=%.3f rawEdgeCost=%.3f decayedEdgeCost=%.3f pastCostAtParent=%.3f\n",
+							     next_pos.x, next_pos.y, c->m_point->m_reopen_count + 1,
+							     best->m_pos.x, best->m_pos.y, oldG, bestG, rawMove, bMove, past_cost));
+						}
+
+						// A tile that gets reopened far more than this search's
+						// distance-scaled cap ever needs is the signature of a
+						// cost-decreasing cycle (e.g. via DecayOrtho) rather
+						// than normal progress. Trips the debugger right here,
+						// on the offending tile, instead of at some arbitrary
+						// later iteration count.
+						if (c->m_point->m_reopen_count + 1 >= maxReopens)
+						{
+							// If you only want to track the army/city from that the path originated
+							// then feed the ID reported here into CtpAiDebug::SetDebugArmy in
+							// CtpAi::Initialize
+							DPRINTF(k_DBG_FIX,
+							    ("Astar::FindPath: reopen cap about to trip, player %d, army 0x%x\n",
+							     GetOwner(), GetArmyId()));
+						}
+						Assert(++c->m_point->m_reopen_count < maxReopens);
+
 						if (c->m_point->GetExpanded())
 						{
 							// The node has already been expanded: propagate the
@@ -394,6 +447,7 @@ bool Astar::FindPath
 #endif
 				c->m_point = g_astar_mem.GetNew();
 				c->m_search_count = g_search_count;
+				c->m_point->m_reopen_count = 0;
 
 				if (InitPoint(best, c->m_point, next_pos, past_cost, dest))
 				{
@@ -432,7 +486,8 @@ bool Astar::FindPath
 
 		if (best)
 		{
-			DPRINTF(k_DBG_ASTAR,("\tCheckBest , StartPos (%d, %d), DestPos (%d, %d), BestPos (%d, %d)\n", start.x, start.y, dest.x, dest.y, best->m_pos.x, best->m_pos.y));
+			AI_DPRINTF(k_DBG_ASTAR, GetOwner(), -1, GetArmyId(),
+			    ("\tCheckBest , StartPos (%d, %d), DestPos (%d, %d), BestPos (%d, %d)\n", start.x, start.y, dest.x, dest.y, best->m_pos.x, best->m_pos.y));
 			if (best->m_pos == dest)
 			{
 				float               cost;
@@ -454,12 +509,37 @@ bool Astar::FindPath
 			searching = false;
 		}
 
-	} while (searching || (best && (k_ASTAR_BIG <= best->m_entry_cost )) && (nodes_opened < cutoff));
+	} while ((searching || (best && (k_ASTAR_BIG <= best->m_entry_cost ))) && (nodes_opened < cutoff));
 
 	Assert(nodes_opened < cutoff);
 
 	bool const r =  Cleanup(dest, a_path, total_cost, isunit, best);
-	DPRINTF(k_DBG_ASTAR, ("\tFinalPathCosts: %f , StartPos (%d, %d), DestPos (%d, %d), BestPos (%d, %d)\n", total_cost, start.x, start.y, dest.x, dest.y, best->m_pos.x, best->m_pos.y));
+	AI_DPRINTF(k_DBG_ASTAR, GetOwner(), -1, GetArmyId(),
+	    ("\tFinalPathCosts: %f , StartPos (%d, %d), DestPos (%d, %d), BestPos (%d, %d)\n", total_cost, start.x, start.y, dest.x, dest.y, best->m_pos.x, best->m_pos.y));
+
+#if defined(_DEBUG) || defined(USE_LOGGING)
+	if (r)
+	{
+		// Print the actual sequence of tiles the search settled on, so a
+		// suspiciously high total cost can be checked against the real
+		// route instead of just start/dest/best. Walks a copy of a_path so
+		// the caller's own Start()/Next() cursor on the original is left
+		// untouched.
+		char pathBuf[4096];
+		sint32 pathBufLen = 0;
+		MapPoint pathPos;
+		Path pathCopy(&a_path);
+		pathCopy.Start(pathPos);
+		pathBufLen += sprintf(pathBuf + pathBufLen, "(%d,%d)", pathPos.x, pathPos.y);
+		while (!pathCopy.IsEnd() && pathBufLen < sint32(sizeof(pathBuf)) - 32)
+		{
+			pathCopy.Next(pathPos);
+			pathBufLen += sprintf(pathBuf + pathBufLen, "->(%d,%d)", pathPos.x, pathPos.y);
+		}
+		AI_DPRINTF(k_DBG_ASTAR, GetOwner(), -1, GetArmyId(),
+		    ("\tFINAL_PATH (%d steps): %s\n", a_path.Num(), pathBuf));
+	}
+#endif
 
 #ifdef TRACK_ASTAR_NODES
 	g_paths_found++;

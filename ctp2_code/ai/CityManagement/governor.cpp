@@ -3001,7 +3001,7 @@ void Governor::ComputeDesiredUnits()
 		switch (list_num)
 		{
 		case BUILD_UNIT_LIST_OFFENSE:
-			(void) strategy.GetOffensiveGarrisonCount(garrison_count);
+			garrison_count = strategy.GetOffensiveGarrisonCount();
 			m_buildUnitList[list_num].m_perCityGarrison =
 				static_cast<sint16>(garrison_count);
 			m_buildUnitList[list_num].m_maximumGarrisonCount =
@@ -3011,7 +3011,7 @@ void Governor::ComputeDesiredUnits()
 			break;
 
 		case BUILD_UNIT_LIST_DEFENSE:
-			(void) strategy.GetDefensiveGarrisonCount(garrison_count);
+			garrison_count = strategy.GetDefensiveGarrisonCount();
 			m_buildUnitList[list_num].m_perCityGarrison =
 				static_cast<sint16>(garrison_count);
 			m_buildUnitList[list_num].m_maximumGarrisonCount =
@@ -3021,7 +3021,7 @@ void Governor::ComputeDesiredUnits()
 			break;
 
 		case BUILD_UNIT_LIST_RANGED:
-			(void) strategy.GetRangedGarrisonCount(garrison_count);
+			garrison_count = strategy.GetRangedGarrisonCount();
 			m_buildUnitList[list_num].m_perCityGarrison =
 				static_cast<sint16>(garrison_count);
 			m_buildUnitList[list_num].m_maximumGarrisonCount =
@@ -3254,9 +3254,9 @@ void Governor::ComputeDesiredUnits()
 		if (!unit.IsValid())
 			continue;
 
-		strategy.GetOffensiveGarrisonCount(desired_offense);
-		strategy.GetDefensiveGarrisonCount(desired_defense);
-		strategy.GetRangedGarrisonCount(desired_ranged);
+		desired_offense = strategy.GetOffensiveGarrisonCount();
+		desired_defense = strategy.GetDefensiveGarrisonCount();
+		desired_ranged  = strategy.GetRangedGarrisonCount();
 
 		unit->GetPos(pos);
 		CellUnitList *  units_ptr   = g_theWorld->GetArmyPtr(pos);
@@ -3837,8 +3837,8 @@ const BuildListSequenceRecord * Governor::GetMatchingSequence(const CityData *ci
 // Attention! GetNeededGarrisonUnitType also yiels other unit types and kind of replaces GetNeededUnitType
 // GetNeededGarrisonUnitType function covers GarrisonUnitBuildList of BuildListSequences.txt,
 // which is called far more often than AllUnitBuildList which is covered by GetNeededUnitType
-// possibly GetNeededGarrisonUnitType and GetNeededUnitType should be unified and one of them deprecated
-// which would include removal of dublicated code
+// possibly GetNeededGarrisonUnitType and GetNeededUnitType should be merged and one of them removed
+// including duplicated code
 sint32 Governor::GetNeededUnitType(const CityData *city, sint32 & list_num) const
 {
 	Assert(g_player[m_playerId]);
@@ -4072,8 +4072,8 @@ double Governor::MaxiumGarrisonDefence(const MapPoint & pos) const
 		{
 			const UnitRecord* rec = GetDBUnitRec(list_ref.m_bestType);
 
-//			double defence   = unitutil_GetPositionDefense(rec, true, pos, Unit()); // @ToDo figure out which defence should be used
-//			double defence   = rec->GetDefense(); // Raw defense
+//			double defense   = unitutil_GetPositionDefense(rec, true, pos, Unit()); // @ToDo figure out which defense should be used
+//			double defense   = rec->GetDefense(); // Raw defense
 			double firepower = static_cast<double>(rec->GetFirepower());
 			double hitpoints = static_cast<double>(rec->GetMaxHP());
 
@@ -4088,8 +4088,8 @@ double Governor::MaxiumGarrisonDefence(const MapPoint & pos) const
 // Attention! GetNeededGarrisonUnitType also yiels other unit types and kind of replaces GetNeededUnitType
 // This function covers GarrisonUnitBuildList of BuildListSequences.txt, which is called far more often than
 // AllUnitBuildList which is covered by GetNeededUnitType
-// possibly GetNeededGarrisonUnitType and GetNeededUnitType should be unified and one of them deprecated
-// which would include removal of dublicated code
+// Possibly GetNeededGarrisonUnitType and GetNeededUnitType should be merged and one of them removed
+// including duplicated code
 sint32 Governor::GetNeededGarrisonUnitType(const CityData * city, sint32 & list_num) const
 {
 	Assert( city );
