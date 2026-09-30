@@ -17,8 +17,14 @@
  */
 
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#if defined(_MSC_VER) && !defined(__clang__)
+/* MSVC's C toolchain does not provide max_align_t; its STL defines it as double */
+typedef double max_align_t;
+#endif
 
 #include "internal.h"
 #include "refstruct.h"

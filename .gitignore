@@ -900,4 +900,6 @@ ctp2_program/
 usercritmsgs.txt
 userkeymap.txt
 userprofile.txt
+.claude/
+NASM/nasm-bin/
 
