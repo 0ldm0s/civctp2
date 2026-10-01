@@ -902,4 +902,10 @@ userkeymap.txt
 userprofile.txt
 .claude/
 NASM/nasm-bin/
+ctp2_data/default/graphics/pictures/
+ctp2_data/default/videos/
+ctp2_data/default/gamedata/playlist.txt
+ctp2_data/default/gamedata/hscore.txt
+*.zfs
+CritMsgs.txt
 

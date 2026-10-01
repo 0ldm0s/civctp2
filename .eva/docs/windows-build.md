@@ -63,11 +63,60 @@ wipx、winets、wudplan（网络传输 DLL）
 3. **`ctp2_code/libs/FFmpeg-n6.1.2/libavcodec/refstruct.c`** — 补 `#include <stddef.h>` + MSVC 下 `typedef double max_align_t`。原因：VS 18 的 C 工具链（14.51）不提供 `max_align_t`（其 STL 在 C++ 里定义为 double），FFmpeg 代码依赖 glibc 的链式引入。
 4. **`/p:VisualStudioVersion=18.0`** — SMP 工程的 `<LanguageStandard_C Condition="'$(VisualStudioVersion)' > '15.0'">stdc11</LanguageStandard_C>`，而 sln 头声明 `# Visual Studio 15` 会把该属性压成 15.0，条件不成立导致 C89 模式报 `_Alignof`/`max_align_t` 错误。
 
-## 输出与运行
+## 运行与数据（2026-10-01 社区版实机跑通验证）
 
 - 主程序：`ctp2_code/ctp/x64/ctp2.exe`（约 5.1 MB）
 - 运行时依赖（均在 `ctp/x64/`，构建自动落位）：`anet2.dll`、`tiff.dll`、`zlibwapi.dll`（构建产物）；`SDL2.dll`、`SDL2_mixer.dll`、`SDL2_image.dll`（预编译自动拷贝）；`dll/map/`（4 个 mapgen 插件）；`dll/net/`（3 个传输 DLL）
-- 游戏数据 `ctp2_data` 需在运行目录可见（见 README 补数据方法）
+
+### 启动方式
+
+必须控制工作目录（civpaths.txt 及其内所有相对路径都相对 cwd 解析）：
+
+```bash
+MSYS2_ARG_CONV_EXCL="*" powershell.exe -NoProfile -Command "Start-Process -FilePath 'D:\workspaces\civctp2\ctp2_code\ctp\x64\ctp2.exe' -WorkingDirectory 'D:\workspaces\civctp2\ctp2_code\ctp\x64'"
+```
+
+### civpaths.txt 路径机制（`ctp/x64/civpaths.txt`，用上游原版即可）
+
+文件为纯值行列表，`fscanf %s` 顺序读入（空格会截断，不能写带空格的路径）：
+
+| 行 | 内容 | 去向 |
+|----|------|------|
+| 1 | `..` | m_hdPath |
+| 2 | （CD 路径，SDL 版丢弃） | dummy |
+| 3 | `default` | m_defaultPath |
+| 4 | `english` | m_localizedPath |
+| 5 | `..\..\ctp2_data` | m_dataPath（数据根，**两跳**） |
+| 6 | `..\..\Scenarios` | m_scenariosPath |
+| 7-13 | save 系目录 | 存档树（实际落在 `ctp/save/`） |
+| 14-29 | gamedata/uidata/graphics... | assetPaths[C3DIR_*]，**保持树内短名** |
+
+**跳数陷阱**：文件查找（`CivPaths::FindFile`）的拼串格式是 `hdPath\dataPath\default|english\assetPath\filename`，`hdPath` 的 `..` **自占一跳**。cwd=x64 时 dataPath 写两跳（`..` + 两跳 = 三跳到仓库根）才正确；写成三跳会落到 `D:\workspaces\ctp2_data`。
+
+**不要给 assetPaths（行 14-29）加数据根前缀**：语言回退组合是 `dataPath\english\assetPath`，assetPaths 带 `..\..\` 前缀会把 english 组合劫持回 default 树，导致 `Strings.txt`（只在语言树）找不到。
+
+### 数据完整性现状（重要）
+
+上游 git 仓库**有意不携带二进制资源**，仓库 `ctp2_data`（74 MB）与完整安装差距很大：
+
+1. LDL 布局（`default/uidata/layouts/*.ldl`，94 个）引用 998 个 tga，仓库仅存少量；CD 安装（`civmain.ctp`/`civlang.ctp`，即 ZIP 包）与 GOG 安装同样不含大部分社区引用的资源。
+2. 原版贴图以 **ZFS 档案**（`graphics/pictures/pic555.zfs`、`pic565.zfs`、`patterns/pat*.zfs`、`sound/sound.zfs`）形式分发，仓库同样没有。游戏有 `.tga → .rim` 的 ZFS 回退（`FindFile` + `g_ImageMapPF`，按像素格式选 555/565 档案），前提是 ZFS 能被 `AddSearchPacks` 按 assetPaths 目录找到。
+3. 部分社区 UI 资源（cba 系列、b4_titlebar 系列、ug 系列等 839 个）**任何发行物中都不存在**——上游从未发布，只能在 Apolyton 论坛/CivFanatics 资源区找社区积累包，或用占位图兜底。
+
+### 本机已做的数据补齐（不入库，见 .gitignore）
+
+- 从 GOG 安装（`D:\Games\GOG Galaxy\Games\Call To Power 2\`）robocopy 补缺到仓库 `ctp2_data/default/`：playlist.txt、全量 ZFS、原版贴图（`/XC /XN /XO` 只补缺不覆盖仓库文本改动）
+- 从原版 CD 镜像（archive.org 的 [CTP2 2000 版](https://archive.org/details/Call_to_Power_II_Microprose_Activision_2000)，BIN 为 MODE1/2352 raw 格式，需剥 16 字节扇区头转 ISO 后 7z 解包）提取 ZFS
+- 为 839 个无源贴图生成 32x32 **24 位**黑色占位 TGA 放 `default/graphics/pictures/`（注意：32 位 TGA 会让 aui 的 Targa 加载器直接崩溃退出，必须 24 位）。拿到真实资源后直接覆盖同名文件即可。
+
+### 运行期错误对照
+
+| 弹窗 | 含义 |
+|------|------|
+| `Paths Error: 'xxx' not found in asset tree` | 该文件不在数据树：Language.txt/Strings.txt 类=路径跳数错或语言树缺文件；playlist.txt=仓库缺文件，需从 GOG 补 |
+| `Targa Load Error: Unable to find 'xxx.tga'` | 数据树已通，缺具体贴图：uptg 系列可由 ZFS 回退解决（确认 pic*.zfs 可达）；cba/ug/b4 系列需占位或社区资源 |
+| 启动即无声退出（exit -1） | 32 位占位 TGA 崩溃，换 24 位 |
+| 游戏能进但界面黑块 | 占位贴图生效中，属预期；替换真实资源即恢复 |
 
 ## 常见错误速查
 
